@@ -14,6 +14,7 @@ class AudioEngine:
         self._stream: sd.OutputStream | None = None
         self._running = False
         self._master_volume = 0.8
+        self._peak_level = 0.0
 
     def start(self):
         self._running = True
@@ -56,6 +57,9 @@ class AudioEngine:
         # Soft clip to avoid harsh clipping
         out = np.tanh(out)
 
+        # Measure peak level for VU meter
+        self._peak_level = float(np.max(np.abs(out)))
+
         outdata[:, 0] = out.astype(np.float32)
 
     def _process_midi(self, msg):
@@ -88,6 +92,10 @@ class AudioEngine:
             channel.set_param(param, scaled)
         elif cc == 120 or cc == 123:  # All Sound Off / All Notes Off
             channel.all_notes_off()
+
+    @property
+    def peak_level(self) -> float:
+        return self._peak_level
 
     @property
     def master_volume(self) -> float:

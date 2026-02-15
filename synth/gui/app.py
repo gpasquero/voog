@@ -205,6 +205,79 @@ class RotaryKnob(tk.Canvas):
                 self._cmd(self._value)
 
 
+# ── VU Meter widget ───────────────────────────────────────────────
+
+class VUMeter(tk.Canvas):
+    """Vertical VU meter with green→yellow→red gradient and peak hold."""
+
+    _DB_MIN = -60.0
+    _DB_MAX = 0.0
+    _PEAK_DECAY = 0.6  # dB drop per update tick
+
+    def __init__(self, parent, width=20, height=100):
+        super().__init__(parent, width=width, height=height,
+                         bg=BG_PANEL, highlightthickness=0)
+        self._vu_w = width
+        self._vu_h = height
+        self._level_db = self._DB_MIN
+        self._peak_db = self._DB_MIN
+        self._draw()
+
+    def set_level(self, linear):
+        """Set the current level from a linear 0..1+ value."""
+        if linear < 1e-10:
+            self._level_db = self._DB_MIN
+        else:
+            self._level_db = max(self._DB_MIN,
+                                 min(self._DB_MAX, 20.0 * math.log10(linear)))
+        # Peak hold: only rise instantly, decay slowly
+        if self._level_db > self._peak_db:
+            self._peak_db = self._level_db
+        else:
+            self._peak_db = max(self._DB_MIN,
+                                self._peak_db - self._PEAK_DECAY)
+        self._draw()
+
+    def _db_to_y(self, db):
+        """Map dB value to y coordinate (0=top, height=bottom)."""
+        ratio = (db - self._DB_MIN) / (self._DB_MAX - self._DB_MIN)
+        ratio = max(0.0, min(1.0, ratio))
+        return int(self._vu_h * (1.0 - ratio))
+
+    def _draw(self):
+        self.delete("all")
+        w, h = self._vu_w, self._vu_h
+        bar_x1, bar_x2 = 3, w - 3
+        level_y = self._db_to_y(self._level_db)
+
+        # Reference marks at -6, -12, -24, -48 dB
+        for db in (-6, -12, -24, -48):
+            y = self._db_to_y(db)
+            self.create_line(0, y, w, y, fill="#333333", width=1)
+
+        # Draw filled bar as segments with color gradient
+        seg_h = max(1, h // 30)
+        y = h
+        while y > level_y:
+            ratio = 1.0 - (y / h)  # 0 at bottom, 1 at top
+            if ratio < 0.6:
+                color = "#22cc44"   # green
+            elif ratio < 0.8:
+                color = "#cccc22"   # yellow
+            else:
+                color = "#cc3322"   # red
+            y_top = max(level_y, y - seg_h)
+            self.create_rectangle(bar_x1, y_top, bar_x2, y - 1,
+                                  fill=color, outline="")
+            y -= seg_h
+
+        # Peak hold indicator
+        peak_y = self._db_to_y(self._peak_db)
+        if self._peak_db > self._DB_MIN + 1:
+            self.create_line(bar_x1, peak_y, bar_x2, peak_y,
+                             fill=AMBER, width=2)
+
+
 # ── Value formatters ───────────────────────────────────────────────
 
 def _fmt_cutoff(v):
@@ -359,17 +432,6 @@ class SynthGUI(tk.Tk):
             btn.pack(side=tk.LEFT, padx=1)
             self.channel_buttons.append(btn)
 
-        tk.Frame(bar, bg=BORDER, width=1, height=24).pack(side=tk.LEFT,
-                                                           padx=10)
-        tk.Label(bar, text="MASTER", bg=BG_DARK, fg=CREAM_DIM,
-                 font=("Helvetica", 9)).pack(side=tk.LEFT)
-        self.master_vol = tk.Scale(
-            bar, from_=0, to=100, orient=tk.HORIZONTAL, length=120,
-            bg=BG_DARK, fg=CREAM, troughcolor=TROUGH,
-            highlightthickness=0, activebackground=AMBER,
-            sliderrelief=tk.FLAT, command=self._on_master_volume)
-        self.master_vol.set(int(self.engine.master_volume * 100))
-        self.master_vol.pack(side=tk.LEFT, padx=4)
 
     def _saved_patch_names(self) -> list[str]:
         return [f.replace(".json", "") for f in self.patch_manager.list_saved()]
@@ -585,12 +647,28 @@ class SynthGUI(tk.Tk):
         # Status
         sf = ttk.LabelFrame(row, text="STATUS", padding=6)
         sf.grid(row=0, column=1, sticky="nsew", padx=2, pady=2)
-        self.voices_label = tk.Label(sf, text="Voices: 0/8", bg=BG_PANEL,
-                                     fg=AMBER,
+
+        status_inner = tk.Frame(sf, bg=BG_PANEL)
+        status_inner.pack(fill=tk.BOTH, expand=True)
+
+        self.voices_label = tk.Label(status_inner, text="Voices: 0/8",
+                                     bg=BG_PANEL, fg=AMBER,
                                      font=("Helvetica", 13, "bold"))
-        self.voices_label.pack(padx=10, pady=10)
+        self.voices_label.pack(side=tk.LEFT, padx=10, pady=10)
+
+        # VU meter
+        self.vu_meter = VUMeter(status_inner, width=20, height=80)
+        self.vu_meter.pack(side=tk.LEFT, padx=(10, 6), pady=4)
+
+        # Master volume knob
+        self.master_knob = RotaryKnob(
+            status_inner, label="MASTER", from_=0, to=100, resolution=1,
+            command=self._on_master_volume)
+        self.master_knob.set(int(self.engine.master_volume * 100))
+        self.master_knob.pack(side=tk.LEFT, padx=6, pady=4)
 
         self._update_voices_display()
+        self._update_vu_meter()
 
     # ── Virtual keyboard ────────────────────────────────────────────
 
@@ -787,6 +865,10 @@ class SynthGUI(tk.Tk):
 
     def _on_master_volume(self, value):
         self.engine.master_volume = float(value) / 100.0
+
+    def _update_vu_meter(self):
+        self.vu_meter.set_level(self.engine.peak_level)
+        self.after(50, self._update_vu_meter)
 
     def _on_cutoff_change(self, value):
         freq = 20.0 * (1000.0 ** (value / 1000.0))
