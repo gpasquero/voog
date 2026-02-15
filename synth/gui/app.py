@@ -248,6 +248,11 @@ class SynthGUI(tk.Tk):
         self._configure_styles(style)
 
         self._load_logo()
+        # Place logo as centered background watermark
+        if self._logo_img:
+            self._bg_logo = tk.Label(self, image=self._logo_img, bg=BG_DARK,
+                                     borderwidth=0)
+            self._bg_logo.place(relx=0.5, rely=0.5, anchor="center")
         self._build_header()
         self._build_top_bar()
         self._build_synth_panels()
@@ -277,20 +282,19 @@ class SynthGUI(tk.Tk):
     # ── Header ──────────────────────────────────────────────────────
 
     def _load_logo(self):
-        """Load the logo image for use in the bottom panel and window icon."""
+        """Load the logo image for window background and icon."""
         logo_path = Path(__file__).resolve().parent.parent.parent / "voog-logo.png"
         self._logo_img = None
         if logo_path.exists():
             try:
                 raw = tk.PhotoImage(file=str(logo_path))
+                img_h = raw.height()
                 # Icon: small version for window titlebar
-                icon_h = raw.height()
-                icon_factor = max(1, icon_h // 48)
+                icon_factor = max(1, img_h // 48)
                 self._icon_img = raw.subsample(icon_factor)
                 self.iconphoto(True, self._icon_img)
-                # Panel logo: large version (~240px tall)
-                target_h = 240
-                factor = max(1, icon_h // target_h)
+                # Background: use full size or light subsample
+                factor = max(1, img_h // 400)
                 if factor > 1:
                     self._logo_img = raw.subsample(factor)
                 else:
@@ -558,14 +562,9 @@ class SynthGUI(tk.Tk):
     def _build_bottom_row(self):
         row = tk.Frame(self, bg=BG_DARK)
         row.pack(fill=tk.X, padx=6, pady=2)
+        row.columnconfigure((0, 1), weight=1)
 
-        if self._logo_img:
-            row.columnconfigure(0, weight=1)
-            row.columnconfigure(1, weight=2)
-        else:
-            row.columnconfigure((0, 1), weight=1)
-
-        # Glide (left)
+        # Glide
         gf = ttk.LabelFrame(row, text="GLIDE", padding=4)
         gf.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
         self.glide_panel: dict = {"frame": gf}
@@ -583,20 +582,13 @@ class SynthGUI(tk.Tk):
         time_knob.grid(row=1, column=0, padx=1)
         self.glide_panel["time"] = time_knob
 
-        # Status + Logo (right)
+        # Status
         sf = ttk.LabelFrame(row, text="STATUS", padding=6)
         sf.grid(row=0, column=1, sticky="nsew", padx=2, pady=2)
-
         self.voices_label = tk.Label(sf, text="Voices: 0/8", bg=BG_PANEL,
                                      fg=AMBER,
                                      font=("Helvetica", 13, "bold"))
-        if self._logo_img:
-            self.voices_label.pack(side=tk.LEFT, padx=20, pady=10)
-            tk.Label(sf, image=self._logo_img, bg=BG_PANEL,
-                     borderwidth=0).pack(side=tk.RIGHT, expand=True,
-                                         padx=10, pady=10)
-        else:
-            self.voices_label.pack(expand=True, padx=10, pady=10)
+        self.voices_label.pack(padx=10, pady=10)
 
         self._update_voices_display()
 
