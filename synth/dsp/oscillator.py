@@ -60,15 +60,11 @@ class Oscillator:
         else:
             increments = np.full(n_samples, f / SAMPLE_RATE, dtype=np.float64)
 
-        # Build phase ramp
-        phases = np.empty(n_samples, dtype=np.float64)
-        p = self.phase
-        for i in range(n_samples):
-            phases[i] = p
-            p += increments[i]
-            if p >= 1.0:
-                p -= 1.0
-        self.phase = p
+        # Build phase ramp (vectorized)
+        # phases[i] is the phase at sample i, before adding increments[i]
+        cumulative = np.cumsum(increments)
+        phases = (self.phase + cumulative - increments) % 1.0
+        self.phase = float((self.phase + cumulative[-1]) % 1.0)
 
         # Wavetable lookup with linear interpolation
         idx_f = phases * ts

@@ -56,8 +56,9 @@ class ADSR:
             else:
                 prev = control_values[i - 1]
                 cur = control_values[i]
-                ramp = np.linspace(prev, cur, block_size, endpoint=False, dtype=np.float64)
-                out[pos:pos + block_size] = ramp
+                # Linear ramp without np.linspace overhead
+                t = np.arange(block_size, dtype=np.float64) / block_size
+                out[pos:pos + block_size] = prev + (cur - prev) * t
             pos += block_size
         return out
 
